@@ -16,12 +16,22 @@ import requestRoutes from './routes/requests';
 const app = express();
 const port = Number(process.env.PORT) || 3001;
 
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  ...(process.env.FRONTEND_URL || '')
+    .split(',')
+    .map((origin) => origin.trim().replace(/\/$/, ''))
+    .filter(Boolean),
+];
+
 app.use(
   cors({
-    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: allowedOrigins,
     credentials: true,
   }),
 );
+
 app.use(express.json());
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 

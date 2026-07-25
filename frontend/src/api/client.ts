@@ -1,5 +1,8 @@
-const API_URL = 'http://localhost:3001/api';
-export const BACKEND_URL = 'http://localhost:3001';
+export const BACKEND_URL = (
+  import.meta.env.VITE_API_URL || 'http://localhost:3001'
+).replace(/\/$/, '');
+
+const API_URL = `${BACKEND_URL}/api`;
 
 export interface ApiOptions extends Omit<RequestInit, 'body'> {
   body?: BodyInit | Record<string, unknown>;
