@@ -1,112 +1,109 @@
-import { useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { api, Listing } from '../api/client';
+import { apiRequest } from '../api/client';
+
+interface Listing {
+  id: string;
+  title: string;
+  category: string;
+  description: string;
+  rental_terms: string;
+}
 
 export default function EditListingPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [categories, setCategories] = useState<string[]>([]);
   const [form, setForm] = useState({
     title: '',
     category: '',
     description: '',
     rental_terms: '',
   });
-  const [categories, setCategories] = useState<string[]>([]);
+  const [images, setImages] = useState<FileList | null>(null);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    api.get<string[]>('/listings/categories').then(setCategories).catch(() => {});
-    api
-      .get<Listing>(`/listings/${id}`)
-      .then((l) =>
+    Promise.all([
+      apiRequest<{ listings: Listing[] }>('/listings/mine'),
+      apiRequest<{ categories: string[] }>('/listings/categories'),
+    ])
+      .then(([listingResponse, categoryResponse]) => {
+        const listing = listingResponse.listings.find((candidate) => candidate.id === id);
+        if (!listing) throw new Error('Listing not found');
         setForm({
-          title: l.title,
-          category: l.category,
-          description: l.description,
-          rental_terms: l.rental_terms,
-        })
-      )
-      .catch(() => navigate('/profile'));
-  }, [id, navigate]);
+          title: listing.title,
+          category: listing.category,
+          description: listing.description,
+          rental_terms: listing.rental_terms,
+        });
+        setCategories(categoryResponse.categories);
+      })
+      .catch((caught: Error) => setError(caught.message));
+  }, [id]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    const body = new FormData();
+    Object.entries(form).forEach(([key, value]) => body.append(key, value));
+    Array.from(images ?? []).forEach((file) => body.append('images', file));
     try {
-      await api.put(`/listings/${id}`, form);
-      navigate(`/listings/${id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Update failed');
-    } finally {
-      setLoading(false);
+      await apiRequest(`/listings/${id}`, { method: 'PUT', body });
+      navigate('/my-listings');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not update listing');
     }
-  };
-
-  const handleDelete = async () => {
-    if (!confirm('Are you sure you want to remove this listing?')) return;
-    try {
-      await api.delete(`/listings/${id}`);
-      navigate('/profile');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Delete failed');
-    }
-  };
+  }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8 sm:px-6">
-      <h1 className="font-display text-3xl font-bold text-slate-900">Edit Listing</h1>
-
-      <form onSubmit={handleSubmit} className="card mt-6 space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium">Title</label>
+    <section className="panel form-panel">
+      <h2>Edit listing</h2>
+      <form onSubmit={submit}>
+        <label>
+          Title
           <input
-            className="input-field"
             value={form.title}
-            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            onChange={(event) => setForm({ ...form, title: event.target.value })}
             required
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">Category</label>
+        </label>
+        <label>
+          Category
           <select
-            className="input-field"
             value={form.category}
-            onChange={(e) => setForm({ ...form, category: e.target.value })}
+            onChange={(event) => setForm({ ...form, category: event.target.value })}
             required
           >
-            {categories.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
+            {categories.map((category) => <option key={category}>{category}</option>)}
           </select>
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">Description</label>
+        </label>
+        <label>
+          Description
           <textarea
-            className="input-field min-h-[100px]"
             value={form.description}
-            onChange={(e) => setForm({ ...form, description: e.target.value })}
+            onChange={(event) => setForm({ ...form, description: event.target.value })}
             required
           />
-        </div>
-        <div>
-          <label className="mb-1 block text-sm font-medium">Rental Terms</label>
+        </label>
+        <label>
+          Rental terms
           <textarea
-            className="input-field"
             value={form.rental_terms}
-            onChange={(e) => setForm({ ...form, rental_terms: e.target.value })}
+            onChange={(event) => setForm({ ...form, rental_terms: event.target.value })}
           />
-        </div>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex gap-3">
-          <button type="submit" className="btn-primary flex-1" disabled={loading}>
-            Save Changes
-          </button>
-          <button type="button" onClick={handleDelete} className="btn-danger">
-            Remove
+        </label>
+        <label>
+          Add images
+          <input type="file" accept="image/*" multiple onChange={(event) => setImages(event.target.files)} />
+        </label>
+        {error && <p className="error">{error}</p>}
+        <div className="actions">
+          <button>Save changes</button>
+          <button className="secondary" type="button" onClick={() => navigate('/my-listings')}>
+            Cancel
           </button>
         </div>
       </form>
-    </div>
+    </section>
   );
 }

@@ -1,983 +1,264 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { Router } from 'express';
+import { isValidObjectId, QueryFilter, Types } from 'mongoose';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { isValidObjectId } from 'mongoose';
-
-import Listing from '../Models/Listing';
-
+import { authenticate, requireVerifiedStudent } from '../middleware/auth';
 import {
-  authenticate,
-  optionalAuth,
-  requireVerifiedStudent,
-} from '../middleware/auth';
-
+  Listing,
+  ListingDocument,
+  ListingModel,
+} from '../models/Listing';
+import { RentalRequestModel } from '../models/RentalRequest';
+import { UserModel } from '../models/User';
+import { asyncHandler } from '../utils/asyncHandler';
 import {
   isValidCategory,
   LISTING_CATEGORIES,
 } from '../utils/validation';
 
 const router = Router();
-
-const uploadsDir = path.join(
-  __dirname,
-  '..',
-  '..',
-  'uploads'
-);
-
-fs.mkdirSync(uploadsDir, {
-  recursive: true,
-});
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, callback) => {
-    callback(null, uploadsDir);
-  },
-
-  filename: (_req, file, callback) => {
-    const uniqueName = `${Date.now()}-${Math.round(
-      Math.random() * 1e9
-    )}`;
-
-    const extension = path
-      .extname(file.originalname)
-      .toLowerCase();
-
-    callback(
-      null,
-      `${uniqueName}${extension}`
-    );
-  },
-});
+const uploadsDirectory = path.join(process.cwd(), 'uploads');
+fs.mkdirSync(uploadsDirectory, { recursive: true });
 
 const upload = multer({
-  storage,
-
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
-
+  storage: multer.diskStorage({
+    destination: uploadsDirectory,
+    filename: (_req, file, callback) => {
+      const safeName = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
+      callback(null, `${Date.now()}-${safeName}`);
+    },
+  }),
+  limits: { files: 5, fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, callback) => {
-    const allowedExtensions = [
-      '.jpg',
-      '.jpeg',
-      '.png',
-      '.webp',
-    ];
-
-    const extension = path
-      .extname(file.originalname)
-      .toLowerCase();
-
-    if (
-      allowedExtensions.includes(extension)
-    ) {
-      callback(null, true);
-      return;
-    }
-
-    callback(
-      new Error(
-        'Only JPG, PNG, and WEBP images are allowed'
-      )
-    );
+    callback(null, file.mimetype.startsWith('image/'));
   },
 });
 
-function removeUploadedFiles(
-  files:
-    | Express.Multer.File[]
-    | undefined
-): void {
-  if (!files?.length) {
-    return;
-  }
-
-  for (const file of files) {
-    const filePath = path.join(
-      uploadsDir,
-      file.filename
-    );
-
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (error) {
-      console.error(
-        `Unable to remove uploaded file ${file.filename}:`,
-        error
-      );
-    }
-  }
-}
-
-function removeStoredImages(
-  images: Array<{
-    filename?: string;
-  }>
-): void {
-  for (const image of images) {
-    if (!image.filename) {
-      continue;
-    }
-
-    const filePath = path.join(
-      uploadsDir,
-      image.filename
-    );
-
-    try {
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    } catch (error) {
-      console.error(
-        `Unable to remove listing image ${image.filename}:`,
-        error
-      );
-    }
-  }
-}
-
-function formatListing(
-  listing: any,
-  isGuest: boolean,
-  isVerified: boolean
-) {
-  const listingObject =
-    typeof listing.toObject === 'function'
-      ? listing.toObject()
-      : listing;
-
-  const owner = listingObject.owner;
-
-  const formattedImages = Array.isArray(
-    listingObject.images
-  )
-    ? listingObject.images.map(
-        (image: {
-          filename?: string;
-          url?: string;
-        }) => ({
-          filename: image.filename,
-          url:
-            image.url ||
-            (image.filename
-              ? `/uploads/${image.filename}`
-              : ''),
-        })
-      )
-    : [];
-
-  const baseListing = {
-    id:
-      listingObject._id?.toString?.() ??
-      listingObject.id,
-
-    title: listingObject.title,
-    category: listingObject.category,
-    description:
-      listingObject.description,
-
-    rental_terms:
-      listingObject.rental_terms,
-
-    availability:
-      listingObject.availability,
-
-    images: formattedImages,
-
-    created_at:
-      listingObject.created_at,
-
-    updated_at:
-      listingObject.updated_at,
-  };
-
-  if (isGuest || !isVerified) {
-    return {
-      ...baseListing,
-
-      owner: owner
-        ? {
-            id:
-              owner._id?.toString?.() ??
-              owner.id,
-
-            first_name:
-              owner.first_name,
-
-            last_name: owner.last_name
-              ? `${owner.last_name.charAt(
-                  0
-                )}.`
-              : '',
-          }
-        : null,
-
-      contact_hidden: true,
-    };
-  }
+async function formatListing(listing: ListingDocument) {
+  const owner = await UserModel.findById(listing.owner_id).select(
+    'first_name last_name',
+  );
 
   return {
-    ...baseListing,
-
-    owner_id: owner
-      ? owner._id?.toString?.() ??
-        owner.id
-      : listingObject.owner?.toString?.(),
-
+    id: listing._id.toString(),
+    owner_id: listing.owner_id.toString(),
+    title: listing.title,
+    category: listing.category,
+    description: listing.description,
+    rental_terms: listing.rental_terms,
+    availability: listing.availability,
+    images: listing.images,
+    created_at: listing.created_at.toISOString(),
+    updated_at: listing.updated_at.toISOString(),
     owner: owner
       ? {
-          id:
-            owner._id?.toString?.() ??
-            owner.id,
-
-          first_name:
-            owner.first_name,
-
-          last_name:
-            owner.last_name,
-
-          email: owner.email,
-          phone: owner.phone,
+          id: owner._id.toString(),
+          first_name: owner.first_name,
+          last_name: owner.last_name,
         }
       : null,
-
-    contact_hidden: false,
   };
 }
 
-/**
- * GET /api/listings/categories
- */
-router.get(
-  '/categories',
-  (_req, res) => {
-    res.json(LISTING_CATEGORIES);
-  }
-);
+function uploadedNames(req: Express.Request): string[] {
+  return ((req.files as Express.Multer.File[] | undefined) ?? []).map(
+    (file) => file.filename,
+  );
+}
 
-/**
- * GET /api/listings
- */
-router.get(
-  '/',
-  optionalAuth,
-  async (req, res) => {
-    try {
-      const {
-        q,
-        category,
-        availability,
-        page = '1',
-        limit = '12',
-      } = req.query;
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
-      const isGuest = !req.user;
+router.get('/categories', (_req, res) => {
+  res.json({ categories: LISTING_CATEGORIES });
+});
 
-      const isVerified =
-        req.user?.role === 'admin' ||
-        req.user
-          ?.verification_status ===
-          'verified';
-
-      const filter: Record<
-        string,
-        unknown
-      > = {};
-
-      if (isGuest || !isVerified) {
-        filter.availability =
-          'available';
-      }
-
-      if (
-        typeof q === 'string' &&
-        q.trim()
-      ) {
-        const escapedSearch =
-          q
-            .trim()
-            .replace(
-              /[.*+?^${}()|[\]\\]/g,
-              '\\$&'
-            );
-
-        filter.$or = [
-          {
-            title: {
-              $regex: escapedSearch,
-              $options: 'i',
-            },
-          },
-          {
-            description: {
-              $regex: escapedSearch,
-              $options: 'i',
-            },
-          },
-        ];
-      }
-
-      if (
-        typeof category === 'string' &&
-        category.trim()
-      ) {
-        filter.category =
-          category.trim();
-      }
-
-      if (
-        typeof availability ===
-          'string' &&
-        isVerified &&
-        [
-          'available',
-          'unavailable',
-        ].includes(availability)
-      ) {
-        filter.availability =
-          availability;
-      }
-
-      const pageNumber = Math.max(
-        1,
-        Number.parseInt(
-          String(page),
-          10
-        ) || 1
-      );
-
-      const limitNumber = Math.min(
-        50,
-        Math.max(
-          1,
-          Number.parseInt(
-            String(limit),
-            10
-          ) || 12
-        )
-      );
-
-      const skip =
-        (pageNumber - 1) *
-        limitNumber;
-
-      const [total, listings] =
-        await Promise.all([
-          Listing.countDocuments(
-            filter
-          ),
-
-          Listing.find(filter)
-            .populate(
-              'owner',
-              '_id first_name last_name email phone'
-            )
-            .sort({
-              created_at: -1,
-            })
-            .skip(skip)
-            .limit(limitNumber),
-        ]);
-
-      res.json({
-        listings: listings.map(
-          (listing) =>
-            formatListing(
-              listing,
-              isGuest,
-              isVerified
-            )
-        ),
-
-        pagination: {
-          page: pageNumber,
-          limit: limitNumber,
-          total,
-          pages: Math.ceil(
-            total / limitNumber
-          ),
-        },
-
-        guest_preview:
-          isGuest || !isVerified,
-      });
-    } catch (error) {
-      console.error(
-        'Get listings error:',
-        error
-      );
-
-      res.status(500).json({
-        error:
-          'Unable to retrieve listings',
-      });
-    }
-  }
-);
-
-/**
- * GET /api/listings/mine
- */
-router.get(
-  '/mine',
-  authenticate,
-  requireVerifiedStudent,
-  async (req, res) => {
-    try {
-      const listings =
-        await Listing.find({
-          owner: req.user!.id,
-        })
-          .populate(
-            'owner',
-            '_id first_name last_name email phone'
-          )
-          .sort({
-            created_at: -1,
-          });
-
-      res.json(
-        listings.map((listing) =>
-          formatListing(
-            listing,
-            false,
-            true
-          )
-        )
-      );
-    } catch (error) {
-      console.error(
-        'Get my listings error:',
-        error
-      );
-
-      res.status(500).json({
-        error:
-          'Unable to retrieve your listings',
-      });
-    }
-  }
-);
-
-/**
- * GET /api/listings/:id
- */
-router.get(
-  '/:id',
-  optionalAuth,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      if (!isValidObjectId(id)) {
-        res.status(400).json({
-          error:
-            'Invalid listing ID',
-        });
-
-        return;
-      }
-
-      const listing =
-        await Listing.findById(id).populate(
-          'owner',
-          '_id first_name last_name email phone'
-        );
-
-      if (!listing) {
-        res.status(404).json({
-          error:
-            'Listing not found',
-        });
-
-        return;
-      }
-
-      const isGuest = !req.user;
-
-      const isVerified =
-        req.user?.role === 'admin' ||
-        req.user
-          ?.verification_status ===
-          'verified';
-
-      res.json(
-        formatListing(
-          listing,
-          isGuest,
-          isVerified
-        )
-      );
-    } catch (error) {
-      console.error(
-        'Get listing error:',
-        error
-      );
-
-      res.status(500).json({
-        error:
-          'Unable to retrieve listing',
-      });
-    }
-  }
-);
-
-/**
- * POST /api/listings
- */
 router.post(
   '/',
   authenticate,
   requireVerifiedStudent,
   upload.array('images', 5),
-  async (req, res) => {
-    const files = req.files as
-      | Express.Multer.File[]
-      | undefined;
+  asyncHandler(async (req, res) => {
+    const { title, category, description, rental_terms = '' } = req.body as {
+      title?: string;
+      category?: string;
+      description?: string;
+      rental_terms?: string;
+    };
 
-    try {
-      const {
-        title,
-        category,
-        description,
-        rental_terms,
-        availability,
-      } = req.body;
-
-      if (!title?.trim()) {
-        removeUploadedFiles(files);
-
-        res.status(400).json({
-          error:
-            'Title is required',
-        });
-
-        return;
-      }
-
-      if (
-        !category ||
-        !isValidCategory(category)
-      ) {
-        removeUploadedFiles(files);
-
-        res.status(400).json({
-          error:
-            'Valid category is required',
-        });
-
-        return;
-      }
-
-      if (!description?.trim()) {
-        removeUploadedFiles(files);
-
-        res.status(400).json({
-          error:
-            'Description is required',
-        });
-
-        return;
-      }
-
-      const listing =
-        await Listing.create({
-          owner: req.user!.id,
-
-          title:
-            String(title).trim(),
-
-          category:
-            String(category).trim(),
-
-          description:
-            String(description).trim(),
-
-          rental_terms:
-            rental_terms
-              ? String(
-                  rental_terms
-                ).trim()
-              : '',
-
-          availability:
-            availability ===
-            'unavailable'
-              ? 'unavailable'
-              : 'available',
-
-          images:
-            files?.map((file) => ({
-              filename:
-                file.filename,
-
-              url: `/uploads/${file.filename}`,
-            })) ?? [],
-        });
-
-      await listing.populate(
-        'owner',
-        '_id first_name last_name email phone'
-      );
-
-      res.status(201).json(
-        formatListing(
-          listing,
-          false,
-          true
-        )
-      );
-    } catch (error) {
-      removeUploadedFiles(files);
-
-      console.error(
-        'Create listing error:',
-        error
-      );
-
-      res.status(500).json({
-        error:
-          'Unable to create listing',
+    if (!title || !category || !description) {
+      return res.status(400).json({
+        error: 'Title, category, and description are required',
       });
     }
-  }
+    if (!isValidCategory(category)) {
+      return res.status(400).json({ error: 'Choose a valid listing category' });
+    }
+
+    const listing = await ListingModel.create({
+      owner_id: new Types.ObjectId(req.user!.id),
+      title: title.trim(),
+      category,
+      description: description.trim(),
+      rental_terms: rental_terms.trim(),
+      availability: 'available',
+      images: uploadedNames(req),
+    });
+
+    res.status(201).json({
+      message: 'Listing created.',
+      listing: await formatListing(listing),
+    });
+  }),
 );
 
-/**
- * PUT /api/listings/:id
- */
+router.get(
+  '/mine',
+  authenticate,
+  requireVerifiedStudent,
+  asyncHandler(async (req, res) => {
+    const listings = await ListingModel.find({
+      owner_id: req.user!.id,
+    }).sort({ created_at: -1 });
+
+    res.json({
+      listings: await Promise.all(listings.map(formatListing)),
+    });
+  }),
+);
+
 router.put(
   '/:id',
   authenticate,
   requireVerifiedStudent,
   upload.array('images', 5),
-  async (req, res) => {
-    const files = req.files as
-      | Express.Multer.File[]
-      | undefined;
-
-    try {
-      const { id } = req.params;
-
-      if (!isValidObjectId(id)) {
-        removeUploadedFiles(files);
-
-        res.status(400).json({
-          error:
-            'Invalid listing ID',
-        });
-
-        return;
-      }
-
-      const listing =
-        await Listing.findById(id);
-
-      if (!listing) {
-        removeUploadedFiles(files);
-
-        res.status(404).json({
-          error:
-            'Listing not found',
-        });
-
-        return;
-      }
-
-      if (
-        listing.owner.toString() !==
-        req.user!.id
-      ) {
-        removeUploadedFiles(files);
-
-        res.status(403).json({
-          error:
-            'Only listing owners may edit listings',
-        });
-
-        return;
-      }
-
-      const {
-        title,
-        category,
-        description,
-        rental_terms,
-      } = req.body;
-
-      if (!title?.trim()) {
-        removeUploadedFiles(files);
-
-        res.status(400).json({
-          error:
-            'Title is required',
-        });
-
-        return;
-      }
-
-      if (
-        !category ||
-        !isValidCategory(category)
-      ) {
-        removeUploadedFiles(files);
-
-        res.status(400).json({
-          error:
-            'Valid category is required',
-        });
-
-        return;
-      }
-
-      if (!description?.trim()) {
-        removeUploadedFiles(files);
-
-        res.status(400).json({
-          error:
-            'Description is required',
-        });
-
-        return;
-      }
-
-      listing.title =
-        String(title).trim();
-
-      listing.category =
-        String(category).trim();
-
-      listing.description =
-        String(description).trim();
-
-      listing.rental_terms =
-        rental_terms
-          ? String(
-              rental_terms
-            ).trim()
-          : '';
-
-      const remainingImageSlots =
-        Math.max(
-          0,
-          5 - listing.images.length
-        );
-
-      const acceptedFiles =
-        files?.slice(
-          0,
-          remainingImageSlots
-        ) ?? [];
-
-      const rejectedFiles =
-        files?.slice(
-          remainingImageSlots
-        ) ?? [];
-
-      removeUploadedFiles(
-        rejectedFiles
-      );
-
-      for (const file of acceptedFiles) {
-        listing.images.push({
-          filename: file.filename,
-          url: `/uploads/${file.filename}`,
-        });
-      }
-
-      await listing.save();
-
-      await listing.populate(
-        'owner',
-        '_id first_name last_name email phone'
-      );
-
-      res.json(
-        formatListing(
-          listing,
-          false,
-          true
-        )
-      );
-    } catch (error) {
-      removeUploadedFiles(files);
-
-      console.error(
-        'Update listing error:',
-        error
-      );
-
-      res.status(500).json({
-        error:
-          'Unable to update listing',
-      });
+  asyncHandler(async (req, res) => {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: 'Listing not found' });
     }
-  }
+
+    const listing = await ListingModel.findOne({
+      _id: req.params.id,
+      owner_id: req.user!.id,
+    });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
+
+    const { title, category, description, rental_terms } = req.body as {
+      title?: string;
+      category?: string;
+      description?: string;
+      rental_terms?: string;
+    };
+    if (category && !isValidCategory(category)) {
+      return res.status(400).json({ error: 'Choose a valid listing category' });
+    }
+
+    if (title !== undefined) listing.title = title.trim();
+    if (category !== undefined) listing.category = category;
+    if (description !== undefined) listing.description = description.trim();
+    if (rental_terms !== undefined) listing.rental_terms = rental_terms.trim();
+
+    const newImages = uploadedNames(req);
+    if (newImages.length) listing.images.push(...newImages);
+    await listing.save();
+
+    res.json({
+      message: 'Listing updated.',
+      listing: await formatListing(listing),
+    });
+  }),
 );
 
-/**
- * PATCH /api/listings/:id/availability
- */
-router.patch(
-  '/:id/availability',
-  authenticate,
-  requireVerifiedStudent,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
-
-      if (!isValidObjectId(id)) {
-        res.status(400).json({
-          error:
-            'Invalid listing ID',
-        });
-
-        return;
-      }
-
-      const listing =
-        await Listing.findById(id);
-
-      if (!listing) {
-        res.status(404).json({
-          error:
-            'Listing not found',
-        });
-
-        return;
-      }
-
-      if (
-        listing.owner.toString() !==
-        req.user!.id
-      ) {
-        res.status(403).json({
-          error:
-            'Only listing owners may update availability',
-        });
-
-        return;
-      }
-
-      const { availability } =
-        req.body;
-
-      if (
-        ![
-          'available',
-          'unavailable',
-        ].includes(availability)
-      ) {
-        res.status(400).json({
-          error:
-            'Availability must be available or unavailable',
-        });
-
-        return;
-      }
-
-      listing.availability =
-        availability;
-
-      await listing.save();
-
-      await listing.populate(
-        'owner',
-        '_id first_name last_name email phone'
-      );
-
-      res.json(
-        formatListing(
-          listing,
-          false,
-          true
-        )
-      );
-    } catch (error) {
-      console.error(
-        'Update availability error:',
-        error
-      );
-
-      res.status(500).json({
-        error:
-          'Unable to update listing availability',
-      });
-    }
-  }
-);
-
-/**
- * DELETE /api/listings/:id
- */
 router.delete(
   '/:id',
   authenticate,
   requireVerifiedStudent,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
+  asyncHandler(async (req, res) => {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
 
-      if (!isValidObjectId(id)) {
-        res.status(400).json({
-          error:
-            'Invalid listing ID',
-        });
+    const listing = await ListingModel.findOneAndDelete({
+      _id: req.params.id,
+      owner_id: req.user!.id,
+    });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
 
-        return;
-      }
+    await RentalRequestModel.deleteMany({ listing_id: listing._id });
+    res.json({ message: 'Listing removed.' });
+  }),
+);
 
-      const listing =
-        await Listing.findById(id);
+router.patch(
+  '/:id/availability',
+  authenticate,
+  requireVerifiedStudent,
+  asyncHandler(async (req, res) => {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
 
-      if (!listing) {
-        res.status(404).json({
-          error:
-            'Listing not found',
-        });
-
-        return;
-      }
-
-      if (
-        listing.owner.toString() !==
-        req.user!.id
-      ) {
-        res.status(403).json({
-          error:
-            'Only listing owners may remove listings',
-        });
-
-        return;
-      }
-
-      removeStoredImages(
-        listing.images
-      );
-
-      await listing.deleteOne();
-
-      res.json({
-        message:
-          'Listing removed successfully',
-      });
-    } catch (error) {
-      console.error(
-        'Delete listing error:',
-        error
-      );
-
-      res.status(500).json({
-        error:
-          'Unable to remove listing',
+    const availability = req.body.availability as
+      | Listing['availability']
+      | undefined;
+    if (!availability || !['available', 'unavailable'].includes(availability)) {
+      return res.status(400).json({
+        error: 'Availability must be available or unavailable',
       });
     }
-  }
+
+    const listing = await ListingModel.findOne({
+      _id: req.params.id,
+      owner_id: req.user!.id,
+    });
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
+
+    listing.availability = availability;
+    await listing.save();
+    res.json({
+      message: 'Availability updated.',
+      listing: await formatListing(listing),
+    });
+  }),
+);
+
+router.get(
+  '/',
+  authenticate,
+  requireVerifiedStudent,
+  asyncHandler(async (req, res) => {
+    const filter: QueryFilter<Listing> = { availability: 'available' };
+    const search = String(req.query.search ?? '').trim();
+    const category = String(req.query.category ?? '').trim();
+
+    if (search) {
+      const expression = new RegExp(escapeRegExp(search), 'i');
+      filter.$or = [{ title: expression }, { description: expression }];
+    }
+    if (category) filter.category = category;
+
+    const listings = await ListingModel.find(filter).sort({ created_at: -1 });
+    res.json({
+      listings: await Promise.all(listings.map(formatListing)),
+    });
+  }),
+);
+
+router.get(
+  '/:id',
+  authenticate,
+  requireVerifiedStudent,
+  asyncHandler(async (req, res) => {
+    if (!isValidObjectId(req.params.id)) {
+      return res.status(404).json({ error: 'Listing not found' });
+    }
+
+    const listing = await ListingModel.findById(req.params.id);
+    if (!listing) return res.status(404).json({ error: 'Listing not found' });
+    res.json({ listing: await formatListing(listing) });
+  }),
 );
 
 export default router;

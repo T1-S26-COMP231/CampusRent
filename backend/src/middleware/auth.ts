@@ -1,22 +1,16 @@
-import type {
-  NextFunction,
-  Request,
-  Response,
-} from 'express';
-
+import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
+import { isValidObjectId } from 'mongoose';
+import {
+  SafeUser,
+  serializeUser,
+  UserModel,
+} from '../models/User';
+import { asyncHandler } from '../utils/asyncHandler';
 
-import User from '../Models/User';
+const jwtSecret = process.env.JWT_SECRET || 'campusrent-local-development-secret';
 
-export interface AuthUser {
-  id: string;
-  email: string;
-  role: string;
-  first_name: string;
-  last_name: string;
-  verification_status: string;
-  status: string;
-}
+export type AuthUser = SafeUser;
 
 declare global {
   namespace Express {
@@ -26,291 +20,59 @@ declare global {
   }
 }
 
-export interface AuthRequest extends Request {
-  user?: AuthUser;
-}
-
-interface TokenPayload {
-  id: string;
-}
-
-export function signToken(
-  userId: string
-): string {
-  const jwtSecret =
-    process.env.JWT_SECRET;
-
-  if (!jwtSecret) {
-    throw new Error(
-      'JWT_SECRET is not configured'
-    );
-  }
-
+export function signToken(user: Pick<SafeUser, 'id' | 'email' | 'role'>): string {
   return jwt.sign(
-    {
-      id: userId,
-    },
+    { id: user.id, email: user.email, role: user.role },
     jwtSecret,
-    {
-      expiresIn: '7d',
-    }
+    { expiresIn: '7d' },
   );
 }
 
-async function getUserFromToken(
-  token: string
-): Promise<AuthUser | null> {
-  const jwtSecret =
-    process.env.JWT_SECRET;
-
-  if (!jwtSecret) {
-    throw new Error(
-      'JWT_SECRET is not configured'
-    );
+export const authenticate = asyncHandler(async (req, res, next) => {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Authentication required' });
   }
 
-  const decoded = jwt.verify(
-    token,
-    jwtSecret
-  ) as TokenPayload;
-
-  const user = await User.findById(
-    decoded.id
-  ).select(
-    '_id email role first_name last_name verification_status status'
-  );
-
-  if (!user) {
-    return null;
-  }
-
-  return {
-    id: user._id.toString(),
-    email: user.email,
-    role: user.role,
-    first_name: user.first_name,
-    last_name: user.last_name,
-    verification_status:
-      user.verification_status,
-    status: user.status,
-  };
-}
-
-export async function authenticate(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> {
   try {
-    const authorization =
-      req.headers.authorization;
-
-    if (
-      !authorization ||
-      !authorization.startsWith(
-        'Bearer '
-      )
-    ) {
-      res.status(401).json({
-        message:
-          'Authentication token is required',
-      });
-
-      return;
+    const payload = jwt.verify(header.slice(7), jwtSecret) as { id?: string };
+    if (!payload.id || !isValidObjectId(payload.id)) {
+      return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    const token =
-      authorization.split(' ')[1];
-
-    const user =
-      await getUserFromToken(token);
-
-    if (!user) {
-      res.status(401).json({
-        message: 'User not found',
-      });
-
-      return;
+    const user = await UserModel.findById(payload.id);
+    if (!user) return res.status(401).json({ error: 'User not found' });
+    if (user.status === 'suspended') {
+      return res.status(403).json({ error: 'Account suspended' });
     }
 
-    if (user.status !== 'active') {
-      res.status(403).json({
-        message:
-          'This account is not active',
-      });
-
-      return;
-    }
-
-    req.user = user;
-
-    next();
-  } catch (error) {
-    if (
-      error instanceof
-      jwt.TokenExpiredError
-    ) {
-      res.status(401).json({
-        message:
-          'Authentication token has expired',
-      });
-
-      return;
-    }
-
-    if (
-      error instanceof
-      jwt.JsonWebTokenError
-    ) {
-      res.status(401).json({
-        message:
-          'Invalid authentication token',
-      });
-
-      return;
-    }
-
-    console.error(
-      'Authentication error:',
-      error
-    );
-
-    res.status(500).json({
-      message:
-        'Unable to authenticate user',
-    });
-  }
-}
-
-export async function optionalAuth(
-  req: AuthRequest,
-  _res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    const authorization =
-      req.headers.authorization;
-
-    if (
-      !authorization ||
-      !authorization.startsWith(
-        'Bearer '
-      )
-    ) {
-      next();
-      return;
-    }
-
-    const token =
-      authorization.split(' ')[1];
-
-    const user =
-      await getUserFromToken(token);
-
-    if (
-      user &&
-      user.status === 'active'
-    ) {
-      req.user = user;
-    }
-
+    req.user = serializeUser(user);
     next();
   } catch {
-    next();
+    return res.status(401).json({ error: 'Invalid or expired token' });
   }
-}
+});
 
 export function requireVerifiedStudent(
-  req: AuthRequest,
+  req: Request,
   res: Response,
-  next: NextFunction
-): void {
-  if (!req.user) {
-    res.status(401).json({
-      message:
-        'Authentication is required',
-    });
-
-    return;
-  }
-
-  if (req.user.role === 'admin') {
-    next();
-    return;
-  }
-
-  if (
-    req.user.role !== 'student' ||
-    req.user.verification_status !==
-      'verified'
-  ) {
-    res.status(403).json({
-      message:
-        'A verified student account is required',
-    });
-
-    return;
-  }
-
-  next();
-}
-
-export function requireAdmin(
-  req: AuthRequest,
-  res: Response,
-  next: NextFunction
-): void {
-  if (!req.user) {
-    res.status(401).json({
-      message:
-        'Authentication is required',
-    });
-
-    return;
-  }
-
-  if (req.user.role !== 'admin') {
-    res.status(403).json({
-      message:
-        'Administrator access is required',
-    });
-
-    return;
-  }
-
-  next();
-}
-
-export function requireRole(
-  ...allowedRoles: string[]
+  next: NextFunction,
 ) {
-  return (
-    req: AuthRequest,
-    res: Response,
-    next: NextFunction
-  ): void => {
-    if (!req.user) {
-      res.status(401).json({
-        message:
-          'Authentication is required',
-      });
+  if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+  if (req.user.role === 'admin') return next();
+  if (req.user.verification_status !== 'verified') {
+    return res.status(403).json({
+      error: 'Account verification required',
+      verification_status: req.user.verification_status,
+    });
+  }
+  next();
+}
 
-      return;
-    }
-
-    if (
-      !allowedRoles.includes(
-        req.user.role
-      )
-    ) {
-      res.status(403).json({
-        message:
-          'You do not have permission to perform this action',
-      });
-
-      return;
-    }
-
-    next();
-  };
+export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
 }

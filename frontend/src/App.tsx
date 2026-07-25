@@ -1,106 +1,100 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { useAuth } from './context/AuthContext';
 import Layout from './components/Layout';
-import HomePage from './pages/HomePage';
-import BrowsePage from './pages/BrowsePage';
-import ListingDetailPage from './pages/ListingDetailPage';
+import { AuthProvider, useAuth } from './context/AuthContext';
+import AdminPage from './pages/AdminPage';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
-import ProfilePage from './pages/ProfilePage';
 import CreateListingPage from './pages/CreateListingPage';
 import EditListingPage from './pages/EditListingPage';
+import MyListingsPage from './pages/MyListingsPage';
+import BrowsePage from './pages/BrowsePage';
+import ListingDetailPage from './pages/ListingDetailPage';
 import RequestsPage from './pages/RequestsPage';
-import MessagesPage from './pages/MessagesPage';
-import AdminPage from './pages/AdminPage';
 
-function ProtectedRoute({ children, requireVerified = false, requireAdmin = false }: {
-  children: React.ReactNode;
-  requireVerified?: boolean;
-  requireAdmin?: boolean;
-}) {
-  const { user, loading, isVerified, isAdmin } = useAuth();
+function Protected({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  if (loading) return <p className="panel">Loading...</p>;
+  return user ? <>{children}</> : <Navigate to="/login" replace />;
+}
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-campus-200 border-t-campus-600" />
-      </div>
-    );
-  }
-
-  if (!user) return <Navigate to="/login" replace />;
-  if (requireAdmin && !isAdmin) return <Navigate to="/browse" replace />;
-  if (requireVerified && !isVerified) return <Navigate to="/profile" replace />;
-
-  return <>{children}</>;
+function AppRoutes() {
+  const { user } = useAuth();
+  let defaultPath = user?.role === 'admin' ? '/admin' : '/register';
+  if (user?.role === 'student') defaultPath = '/listings/new';
+  if (user?.role === 'student') defaultPath = '/my-listings';
+  if (user?.role === 'student') defaultPath = '/browse';
+  return (
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Navigate to={user ? defaultPath : '/login'} replace />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/admin"
+          element={
+            <Protected>
+              <AdminPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/listings/new"
+          element={
+            <Protected>
+              <CreateListingPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/my-listings"
+          element={
+            <Protected>
+              <MyListingsPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/listings/:id/edit"
+          element={
+            <Protected>
+              <EditListingPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/browse"
+          element={
+            <Protected>
+              <BrowsePage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/listings/:id"
+          element={
+            <Protected>
+              <ListingDetailPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/requests"
+          element={
+            <Protected>
+              <RequestsPage />
+            </Protected>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Layout>
+  );
 }
 
 export default function App() {
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route index element={<HomePage />} />
-        <Route path="browse" element={<BrowsePage />} />
-        <Route path="listings/:id" element={<ListingDetailPage />} />
-        <Route path="login" element={<LoginPage />} />
-        <Route path="register" element={<RegisterPage />} />
-        <Route
-          path="profile"
-          element={
-            <ProtectedRoute>
-              <ProfilePage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="listings/new"
-          element={
-            <ProtectedRoute requireVerified>
-              <CreateListingPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="listings/:id/edit"
-          element={
-            <ProtectedRoute requireVerified>
-              <EditListingPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="requests"
-          element={
-            <ProtectedRoute requireVerified>
-              <RequestsPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="messages"
-          element={
-            <ProtectedRoute requireVerified>
-              <MessagesPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="messages/:id"
-          element={
-            <ProtectedRoute requireVerified>
-              <MessagesPage />
-            </ProtectedRoute>
-          }
-        />
-        <Route
-          path="admin"
-          element={
-            <ProtectedRoute requireAdmin>
-              <AdminPage />
-            </ProtectedRoute>
-          }
-        />
-      </Route>
-    </Routes>
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   );
 }

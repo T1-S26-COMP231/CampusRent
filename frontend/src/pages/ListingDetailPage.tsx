@@ -1,246 +1,117 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, Listing } from '../api/client';
-import { useAuth } from '../context/AuthContext';
+import { FormEvent, useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { apiRequest, BACKEND_URL } from '../api/client';
 import StatusBadge from '../components/StatusBadge';
-import { Package, Calendar, User, MessageSquare, Flag, ArrowLeft } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+
+interface Listing {
+  id: string;
+  owner_id: string;
+  title: string;
+  category: string;
+  description: string;
+  rental_terms: string;
+  availability: 'available' | 'unavailable';
+  images: string[];
+  owner: { first_name: string; last_name: string } | null;
+}
 
 export default function ListingDetailPage() {
   const { id } = useParams();
-  const { user, isVerified } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
   const [listing, setListing] = useState<Listing | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [showReport, setShowReport] = useState(false);
-  const [reportReason, setReportReason] = useState('');
-  const [reportDetails, setReportDetails] = useState('');
+  const [requestForm, setRequestForm] = useState({
+    start_date: '',
+    end_date: '',
+    message: '',
+  });
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
-    api
-      .get<Listing>(`/listings/${id}`)
-      .then(setListing)
-      .catch(() => navigate('/browse'))
-      .finally(() => setLoading(false));
-  }, [id, navigate]);
+    apiRequest<{ listing: Listing }>(`/listings/${id}`)
+      .then((response) => setListing(response.listing))
+      .catch((caught: Error) => setError(caught.message));
+  }, [id]);
 
-  const handleRequest = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
+  async function submitRequest(event: FormEvent) {
+    event.preventDefault();
+    if (!listing) return;
     try {
-      await api.post('/requests', {
-        listing_id: Number(id),
-        start_date: startDate,
-        end_date: endDate,
+      const response = await apiRequest<{ message: string }>('/requests', {
+        method: 'POST',
+        body: { listing_id: listing.id, ...requestForm },
       });
-      navigate('/requests');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit request');
+      setMessage(response.message);
+      setError('');
+      setRequestForm({ start_date: '', end_date: '', message: '' });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not submit request');
     }
-  };
-
-  const handleContact = async () => {
-    if (!listing?.owner?.id) return;
-    try {
-      const conv = await api.post<{ id: number }>('/conversations', {
-        recipient_id: listing.owner.id,
-        listing_id: listing.id,
-        initial_message: `Hi! I'm interested in renting "${listing.title}".`,
-      });
-      navigate(`/messages/${conv.id}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start conversation');
-    }
-  };
-
-  const handleReport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await api.post('/reports', {
-        reported_listing_id: listing?.id,
-        reason: reportReason,
-        details: reportDetails,
-      });
-      setShowReport(false);
-      setMessage('Report submitted. Our admin team will review it.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to submit report');
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="mx-auto max-w-4xl px-4 py-16">
-        <div className="h-96 animate-pulse rounded-2xl bg-slate-200" />
-      </div>
-    );
   }
 
-  if (!listing) return null;
-
-  const isOwner = user?.id === listing.owner?.id;
+  if (error && !listing) return <p className="panel error">{error}</p>;
+  if (!listing) return <p className="panel">Loading listing...</p>;
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 sm:px-6">
-      <Link to="/browse" className="mb-6 inline-flex items-center gap-1 text-sm text-campus-600 hover:underline">
-        <ArrowLeft className="h-4 w-4" /> Back to browse
-      </Link>
-
-      {message && (
-        <div className="mb-4 rounded-xl bg-mint-50 px-4 py-3 text-sm text-mint-600">{message}</div>
-      )}
-
-      <div className="grid gap-8 lg:grid-cols-2">
-        <div>
-          {listing.images?.length ? (
-            <div className="grid gap-2">
-              <img
-                src={listing.images[0].url}
-                alt={listing.title}
-                className="aspect-[4/3] w-full rounded-2xl object-cover"
-              />
-              {listing.images.length > 1 && (
-                <div className="grid grid-cols-4 gap-2">
-                  {listing.images.slice(1).map((img, i) => (
-                    <img key={i} src={img.url} alt="" className="aspect-square rounded-lg object-cover" />
-                  ))}
-                </div>
-              )}
-            </div>
+    <section className="detail-layout">
+      <article className="panel">
+        <div className="detail-images">
+          {listing.images.length ? (
+            listing.images.map((image) => (
+              <img key={image} src={`${BACKEND_URL}/uploads/${image}`} alt="" />
+            ))
           ) : (
-            <div className="flex aspect-[4/3] items-center justify-center rounded-2xl bg-campus-50">
-              <Package className="h-20 w-20 text-campus-300" />
-            </div>
+            <div className="image-placeholder">No images</div>
           )}
         </div>
-
-        <div>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <span className="badge bg-campus-50 text-campus-700">{listing.category}</span>
-              <h1 className="mt-2 font-display text-3xl font-bold text-slate-900">{listing.title}</h1>
-            </div>
-            <StatusBadge status={listing.availability} />
-          </div>
-
-          <p className="mt-4 text-slate-600 leading-relaxed">{listing.description}</p>
-
-          {listing.rental_terms && (
-            <div className="mt-4 rounded-xl bg-slate-50 p-4">
-              <h3 className="text-sm font-semibold text-slate-700">Rental Terms</h3>
-              <p className="mt-1 text-sm text-slate-600">{listing.rental_terms}</p>
-            </div>
-          )}
-
-          {listing.owner && (
-            <div className="mt-6 card !p-4">
-              <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <User className="h-4 w-4" /> Owner
-              </h3>
-              <p className="mt-1 font-medium">
-                {listing.owner.first_name} {listing.owner.last_name}
-              </p>
-              {!listing.contact_hidden && listing.owner.email && (
-                <p className="mt-1 text-sm text-slate-500">{listing.owner.email}</p>
-              )}
-              {listing.contact_hidden && (
-                <p className="mt-1 text-sm text-amber-600">Register & verify to see contact info</p>
-              )}
-            </div>
-          )}
-
-          {isVerified && !isOwner && listing.availability === 'available' && (
-            <div className="mt-6 space-y-4">
-              <form onSubmit={handleRequest} className="card space-y-4">
-                <h3 className="flex items-center gap-2 font-semibold">
-                  <Calendar className="h-4 w-4" /> Request Rental
-                </h3>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium">Start Date</label>
-                    <input
-                      type="date"
-                      className="input-field"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium">End Date</label>
-                    <input
-                      type="date"
-                      className="input-field"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      required
-                    />
-                  </div>
-                </div>
-                {error && <p className="text-sm text-red-600">{error}</p>}
-                <button type="submit" className="btn-primary w-full">Submit Rental Request</button>
-              </form>
-
-              <button onClick={handleContact} className="btn-secondary w-full">
-                <MessageSquare className="h-4 w-4" /> Contact Owner
-              </button>
-            </div>
-          )}
-
-          {!user && (
-            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              <Link to="/register" className="font-semibold underline">Register</Link> with your
-              institutional email to request rentals and message owners.
-            </div>
-          )}
-
-          {user && !isVerified && (
-            <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-              Your account is pending verification. You'll be able to request rentals once approved.
-            </div>
-          )}
-
-          {isVerified && !isOwner && (
-            <button
-              onClick={() => setShowReport(true)}
-              className="mt-4 flex items-center gap-1 text-sm text-slate-400 hover:text-red-600"
-            >
-              <Flag className="h-3 w-3" /> Report this listing
-            </button>
-          )}
+        <div className="card-title">
+          <h2>{listing.title}</h2>
+          <StatusBadge status={listing.availability} />
         </div>
-      </div>
+        <p className="muted">{listing.category}</p>
+        <h3>Description</h3>
+        <p>{listing.description}</p>
+        <h3>Rental terms</h3>
+        <p>{listing.rental_terms || 'Contact the owner to discuss terms.'}</p>
+        <p className="muted">
+          Owner: {listing.owner ? `${listing.owner.first_name} ${listing.owner.last_name}` : 'Student'}
+        </p>
+      </article>
 
-      {showReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <form onSubmit={handleReport} className="card w-full max-w-md space-y-4">
-            <h3 className="font-display text-lg font-bold">Report Listing</h3>
+      {user?.id !== listing.owner_id && listing.availability === 'available' && (
+        <form className="panel request-form" onSubmit={submitRequest}>
+          <h3>Request this item</h3>
+          <label>
+            Start date
             <input
-              className="input-field"
-              placeholder="Reason"
-              value={reportReason}
-              onChange={(e) => setReportReason(e.target.value)}
+              type="date"
+              value={requestForm.start_date}
+              onChange={(event) => setRequestForm({ ...requestForm, start_date: event.target.value })}
               required
             />
+          </label>
+          <label>
+            End date
+            <input
+              type="date"
+              value={requestForm.end_date}
+              onChange={(event) => setRequestForm({ ...requestForm, end_date: event.target.value })}
+              required
+            />
+          </label>
+          <label>
+            Message
             <textarea
-              className="input-field min-h-[100px]"
-              placeholder="Details..."
-              value={reportDetails}
-              onChange={(e) => setReportDetails(e.target.value)}
-              required
+              value={requestForm.message}
+              onChange={(event) => setRequestForm({ ...requestForm, message: event.target.value })}
             />
-            <div className="flex gap-3">
-              <button type="button" onClick={() => setShowReport(false)} className="btn-secondary flex-1">
-                Cancel
-              </button>
-              <button type="submit" className="btn-danger flex-1">Submit Report</button>
-            </div>
-          </form>
-        </div>
+          </label>
+          {error && <p className="error">{error}</p>}
+          {message && <p className="success">{message}</p>}
+          <button>Submit rental request</button>
+        </form>
       )}
-    </div>
+    </section>
   );
 }
