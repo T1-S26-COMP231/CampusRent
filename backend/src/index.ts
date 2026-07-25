@@ -1,67 +1,82 @@
-import express from 'express';
+import 'dotenv/config';
 import cors from 'cors';
-import path from 'path';
-import dotenv from 'dotenv';
-
-import { connectDatabase } from './db';
-
+import express from 'express';
+import mongoose from 'mongoose';
+import path from 'node:path';
+import {
+  connectDatabase,
+  databaseStatus,
+  disconnectDatabase,
+} from './db';
+import adminRoutes from './routes/admin';
 import authRoutes from './routes/auth';
-import userRoutes from './routes/users';
 import listingRoutes from './routes/listings';
 import requestRoutes from './routes/requests';
-import messageRoutes from './routes/messages';
-import reviewRoutes from './routes/reviews';
-import reportRoutes from './routes/reports';
-import adminRoutes from './routes/admin';
-
-dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const port = Number(process.env.PORT) || 3001;
 
-app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
-  credentials: true
-}));
-
+app.use(
+  cors({
+    origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+    credentials: true,
+  }),
+);
 app.use(express.json());
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'CampusRent API' });
+  res.json({
+    status: 'ok',
+    service: 'CampusRent API',
+    database: databaseStatus(),
+  });
 });
 
 app.use('/api/auth', authRoutes);
-app.use('/api/users', userRoutes);
+app.use('/api/admin', adminRoutes);
 app.use('/api/listings', listingRoutes);
 app.use('/api/requests', requestRoutes);
-app.use('/api/conversations', messageRoutes);
-app.use('/api/reviews', reviewRoutes);
-app.use('/api/reports', reportRoutes);
-app.use('/api/admin', adminRoutes);
 
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  if (err.message.includes('images')) {
-    return res.status(400).json({ error: err.message });
-  }
-
-  console.error(err);
-  res.status(500).json({ error: 'Internal server error' });
-});
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    console.error(err);
+    if (
+      err instanceof mongoose.Error.ValidationError ||
+      err instanceof mongoose.Error.CastError
+    ) {
+      return res.status(400).json({ error: err.message });
+    }
+    res.status(500).json({ error: 'Internal server error' });
+  },
+);
 
 async function startServer() {
-  try {
-    await connectDatabase();
+  await connectDatabase();
 
-    app.listen(PORT, () => {
-      console.log(`🚀 CampusRent API running on http://localhost:${PORT}`);
+  const server = app.listen(port, () => {
+    console.log(`CampusRent API running on http://localhost:${port}`);
+  });
+
+  async function shutDown() {
+    server.close(async () => {
+      await disconnectDatabase();
+      process.exit(0);
     });
-
-  } catch (error) {
-    console.error("❌ Unable to connect to MongoDB");
-    console.error(error);
-    process.exit(1);
   }
+
+  process.once('SIGINT', () => void shutDown());
+  process.once('SIGTERM', () => void shutDown());
 }
 
-startServer();
+void startServer().catch((error) => {
+  console.error('Could not start CampusRent API:', error);
+  process.exitCode = 1;
+});
+
+export default app;

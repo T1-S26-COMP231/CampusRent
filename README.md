@@ -1,77 +1,101 @@
-# CampusRent
+# CampusRent — Final v12 (MongoDB)
 
-**Student Item Rental Platform** — COMP 231 Team 1, Centennial College
+This is the cumulative final v12 project. It keeps the earlier work, includes
+US-13, and stores application data in MongoDB through Mongoose.
 
-CampusRent is a web-based rental coordination platform for verified college and university students. Students can list items, browse and search listings, submit rental requests, message each other, leave reviews, and report issues. Administrators verify accounts and moderate the platform.
+## Included user stories
 
-Built according to the TAC Technical Report v5.0 specifications.
+- US-03
+- US-22
+- US-04
+- US-05
+- US-06
+- US-07
+- US-08
+- US-09
+- US-10
+- US-11
+- US-12
+- US-13
 
-## Architecture
+## Technology
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS |
-| Backend | Node.js, Express, TypeScript |
-| Database | SQLite (relational) |
-| API | REST over HTTP/JSON |
-| Auth | JWT + institutional email verification |
+- Frontend: React, TypeScript, and Vite
+- Backend: Node.js, Express, and TypeScript
+- Database: MongoDB
+- MongoDB object modelling: Mongoose
+- Authentication: JSON Web Tokens and bcrypt
 
-## Features (Release 1.0)
+MongoDB is the database that stores the records. Mongoose is the backend
+library that connects the application to MongoDB and defines the User, Listing,
+and RentalRequest schemas.
 
-### Guest Users
-- Browse and search limited listing previews (US-01)
-- View basic item information (US-02)
-- Register with institutional email (US-03)
+## Structure
 
-### Registered Students (verified)
-- Create, edit, remove listings and update availability (US-04–07)
-- Browse, search, filter, and view item details (US-08–10)
-- Submit, track, approve/decline rental requests (US-11–15)
-- Messaging between students (US-16–18)
-- Ratings and reviews after completed rentals (US-19)
-- Report users/listings (US-20)
-- Manage profile (US-21)
+- `backend/src/models` — Mongoose models and validation rules
+- `backend/src/db.ts` — MongoDB connection
+- `backend/src/routes/auth.ts` — registration and authentication
+- `backend/src/routes/admin.ts` — student verification
+- `backend/src/routes/listings.ts` — listing operations
+- `backend/src/routes/requests.ts` — rental-request operations
+- `frontend/src/pages` — page-level React screens
+- `frontend/src/components` — shared display components
 
-### System Administration
-- Verify student accounts (US-22)
-- Moderate reports (US-23)
-- Platform activity dashboard (US-24)
+## Configure MongoDB
 
-## Quick Start
+1. Make sure MongoDB is running locally, or create a MongoDB Atlas database.
 
-### Prerequisites
-- Node.js 18+
+2. Copy `backend/.env.example` to `backend/.env`.
 
-### Install and Run
+3. Set the connection string in `backend/.env`:
+
+   ```env
+   PORT=3001
+   JWT_SECRET=replace-with-a-long-random-secret
+   MONGODB_URI=mongodb://127.0.0.1:27017/campusrent
+   ```
+
+   For MongoDB Atlas, replace `MONGODB_URI` with the connection string supplied
+   by Atlas. Keep `.env` private and do not commit it.
+
+## Install and run
+
+From the project root:
+
+1. Install the root helper and both applications:
+
+   ```bash
+   npm install
+   npm run install:all
+   ```
+
+2. Create the demo accounts in MongoDB:
+
+   ```bash
+   npm run seed
+   ```
+
+   - Admin: `admin@mycentennialcollege.ca` / `admin123`
+   - Verified student: `student@mycentennialcollege.ca` / `student123`
+
+3. Start the frontend and backend:
+
+   ```bash
+   npm run dev
+   ```
+
+- Frontend: http://localhost:5173
+- Backend: http://localhost:3001/api
+- Health check: http://localhost:3001/api/health
+
+The health check reports `"database": "connected"` when Mongoose is connected
+to MongoDB.
+
+## Production build
 
 ```bash
-npm install
-npm run install:all
-npm run dev
+npm run build
 ```
 
-- **Frontend:** http://localhost:5173
-- **Backend API:** http://localhost:3001/api
-
-### Demo Accounts
-
-| Role | Email | Password |
-|------|-------|----------|
-| Admin | admin@mycentennialcollege.ca | admin123 |
-| Student | maria@mycentennialcollege.ca | student123 |
-| Student | john@mycentennialcollege.ca | student123 |
-
-New student registrations require admin approval before accessing rental features.
-
-## Project Structure
-
-```
-CampusRent Project/
-├── backend/          # Express REST API
-├── frontend/         # React SPA
-└── package.json      # Root scripts
-```
-
-## Team
-
-Brian Bernales · Eden Mendez · Luiz Figueiredo · Megha Patel · Ramika Dinan · Saniyabanu Ansari
+Runtime files such as `node_modules`, `dist`, `backend/.env`, and uploaded
+images are intentionally excluded.

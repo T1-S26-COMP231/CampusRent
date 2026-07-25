@@ -1,87 +1,62 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { api, setToken, User } from '../api/client';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { apiRequest } from '../api/client';
 
-interface AuthContextType {
+export interface User {
+  id: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  role: 'student' | 'admin';
+  verification_status: 'pending' | 'verified' | 'rejected';
+}
+
+interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (data: {
-    email: string;
-    password: string;
-    first_name: string;
-    last_name: string;
-  }) => Promise<void>;
   logout: () => void;
-  refreshUser: () => Promise<void>;
-  isVerified: boolean;
-  isAdmin: boolean;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const refreshUser = async () => {
-    try {
-      const me = await api.get<User>('/auth/me');
-      setUser(me);
-    } catch {
-      setUser(null);
-      setToken(null);
-    }
-  };
-
   useEffect(() => {
-    const token = localStorage.getItem('campusrent_token');
-    if (token) refreshUser().finally(() => setLoading(false));
-    else setLoading(false);
+    if (!localStorage.getItem('campusrent_token')) {
+      setLoading(false);
+      return;
+    }
+    apiRequest<{ user: User }>('/auth/me')
+      .then((response) => setUser(response.user))
+      .catch(() => localStorage.removeItem('campusrent_token'))
+      .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const res = await api.post<{ token: string; user: User }>('/auth/login', {
-      email,
-      password,
+  async function login(email: string, password: string) {
+    const response = await apiRequest<{ token: string; user: User }>('/auth/login', {
+      method: 'POST',
+      body: { email, password },
     });
-    setToken(res.token);
-    setUser(res.user);
-  };
+    localStorage.setItem('campusrent_token', response.token);
+    setUser(response.user);
+  }
 
-  const register = async (data: {
-    email: string;
-    password: string;
-    first_name: string;
-    last_name: string;
-  }) => {
-    await api.post('/auth/register', data);
-  };
-
-  const logout = () => {
-    setToken(null);
+  function logout() {
+    localStorage.removeItem('campusrent_token');
     setUser(null);
-  };
+  }
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        loading,
-        login,
-        register,
-        logout,
-        refreshUser,
-        isVerified: user?.verification_status === 'verified' || user?.role === 'admin',
-        isAdmin: user?.role === 'admin',
-      }}
-    >
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+  const value = useContext(AuthContext);
+  if (!value) throw new Error('useAuth must be used inside AuthProvider');
+  return value;
 }

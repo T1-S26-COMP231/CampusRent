@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
@@ -8,69 +8,44 @@ export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
     setError('');
-    setLoading(true);
     try {
       await login(email, password);
-      navigate('/browse');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
+      navigate('/');
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Login failed');
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
-  };
+  }
 
   return (
-    <div className="flex min-h-[70vh] items-center justify-center px-4 py-12">
-      <div className="card w-full max-w-md">
-        <h1 className="font-display text-2xl font-bold text-slate-900">Welcome back</h1>
-        <p className="mt-1 text-sm text-slate-500">Sign in to your CampusRent account</p>
-
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium">Email</label>
-            <input
-              type="email"
-              className="input-field"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="you@mycentennialcollege.ca"
-              required
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">Password</label>
-            <input
-              type="password"
-              className="input-field"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-            />
-          </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button type="submit" className="btn-primary w-full" disabled={loading}>
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-        </form>
-
-        <p className="mt-6 text-center text-sm text-slate-500">
-          Don't have an account?{' '}
-          <Link to="/register" className="font-semibold text-campus-600 hover:underline">
-            Register
-          </Link>
-        </p>
-
-        <div className="mt-6 rounded-xl bg-slate-50 p-3 text-xs text-slate-500">
-          <p className="font-medium">Demo accounts:</p>
-          <p>Admin: admin@mycentennialcollege.ca / admin123</p>
-          <p>Student: maria@mycentennialcollege.ca / student123</p>
-        </div>
-      </div>
-    </div>
+    <section className="panel form-panel">
+      <h2>Log in</h2>
+      <form onSubmit={submit}>
+        <label>
+          Email
+          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+        </label>
+        <label>
+          Password
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
+        {error && <p className="error">{error}</p>}
+        <button disabled={saving}>{saving ? 'Logging in...' : 'Log in'}</button>
+      </form>
+      <p className="form-footer">
+        Need an account? <Link to="/register">Register</Link>
+      </p>
+    </section>
   );
 }

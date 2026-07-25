@@ -1,176 +1,48 @@
-import {
-  Schema,
-  model,
-  models,
-  type HydratedDocument,
-  type Model,
-  type Types,
-} from 'mongoose';
+import { HydratedDocument, model, Schema, Types } from 'mongoose';
 
-export type ListingAvailability =
-  | 'available'
-  | 'unavailable';
+export type ListingAvailability = 'available' | 'unavailable';
 
-export interface IListingImage {
-  filename: string;
-  url: string;
-}
-
-export interface IListing {
-  owner: Types.ObjectId;
+export interface Listing {
+  owner_id: Types.ObjectId;
   title: string;
   category: string;
   description: string;
   rental_terms: string;
   availability: ListingAvailability;
-  images: IListingImage[];
+  images: string[];
   created_at: Date;
   updated_at: Date;
 }
 
-export type ListingDocument =
-  HydratedDocument<IListing>;
+export type ListingDocument = HydratedDocument<Listing>;
 
-const listingImageSchema =
-  new Schema<IListingImage>(
-    {
-      filename: {
-        type: String,
-        required: true,
-        trim: true,
-      },
-
-      url: {
-        type: String,
-        required: true,
-        trim: true,
-      },
+const listingSchema = new Schema<Listing>(
+  {
+    owner_id: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+      index: true,
     },
-    {
-      _id: false,
-    }
-  );
-
-const listingSchema =
-  new Schema<IListing>(
-    {
-      owner: {
-        type: Schema.Types.ObjectId,
-        ref: 'User',
-        required: [
-          true,
-          'Listing owner is required',
-        ],
-        index: true,
-      },
-
-      title: {
-        type: String,
-        required: [
-          true,
-          'Title is required',
-        ],
-        trim: true,
-        maxlength: [
-          150,
-          'Title cannot exceed 150 characters',
-        ],
-      },
-
-      category: {
-        type: String,
-        required: [
-          true,
-          'Category is required',
-        ],
-        trim: true,
-        index: true,
-      },
-
-      description: {
-        type: String,
-        required: [
-          true,
-          'Description is required',
-        ],
-        trim: true,
-        maxlength: [
-          3000,
-          'Description cannot exceed 3000 characters',
-        ],
-      },
-
-      rental_terms: {
-        type: String,
-        trim: true,
-        default: '',
-        maxlength: [
-          2000,
-          'Rental terms cannot exceed 2000 characters',
-        ],
-      },
-
-      availability: {
-        type: String,
-        enum: {
-          values: [
-            'available',
-            'unavailable',
-          ],
-          message:
-            'Availability must be available or unavailable',
-        },
-        default: 'available',
-        index: true,
-      },
-
-      images: {
-        type: [listingImageSchema],
-        default: [],
-        validate: {
-          validator(
-            images: IListingImage[]
-          ) {
-            return images.length <= 5;
-          },
-          message:
-            'A listing can contain a maximum of 5 images',
-        },
-      },
+    title: { type: String, required: true, trim: true },
+    category: { type: String, required: true, trim: true, index: true },
+    description: { type: String, required: true, trim: true },
+    rental_terms: { type: String, default: '', trim: true },
+    availability: {
+      type: String,
+      enum: ['available', 'unavailable'],
+      default: 'available',
+      required: true,
+      index: true,
     },
-    {
-      timestamps: {
-        createdAt: 'created_at',
-        updatedAt: 'updated_at',
-      },
+    images: [{ type: String, trim: true }],
+  },
+  {
+    timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' },
+  },
+);
 
-      versionKey: false,
+listingSchema.index({ availability: 1, category: 1, created_at: -1 });
+listingSchema.index({ title: 'text', description: 'text' });
 
-      collection: 'listings',
-    }
-  );
-
-listingSchema.index({
-  title: 'text',
-  description: 'text',
-});
-
-listingSchema.index({
-  owner: 1,
-  created_at: -1,
-});
-
-listingSchema.index({
-  category: 1,
-  availability: 1,
-  created_at: -1,
-});
-
-const Listing: Model<IListing> =
-  models.Listing ||
-  model<IListing>(
-    'Listing',
-    listingSchema
-  );
-
-export default Listing;
+export const ListingModel = model<Listing>('Listing', listingSchema);
